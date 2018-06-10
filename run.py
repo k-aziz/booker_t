@@ -3,9 +3,15 @@ import time
 
 import arrow
 import clockwork
+import logging
 from selenium import webdriver
 
 from settings import LICENCE_NUMBER, TEST_REF, CLOCKWORK_API_KEY, APP_NAME, PHONE_NUMBER, MIN_SECONDS, MAX_SECONDS
+
+logging.basicConfig(filename='merchant_api.log')
+logger = logging.getLogger('logger')
+
+logger.setLevel(logging.INFO)
 
 URL = 'https://driverpracticaltest.direct.gov.uk/login'
 api = clockwork.API(CLOCKWORK_API_KEY, from_name=APP_NAME)
@@ -14,33 +20,37 @@ api = clockwork.API(CLOCKWORK_API_KEY, from_name=APP_NAME)
 def main():
     # Date of the last booking that was sent most recently
     last_sent_date = None
-
     while True:
-        driver = webdriver.Firefox()
+        options = webdriver.firefox.options.Options()
+        options.add_argument('--headless')
+        options.add_argument('--hide-scrollbars')
+        options.add_argument('--disable-gpu')
+
+        driver = webdriver.Firefox(firefox_options=options)
 
         login(driver)
-        print('logged in')
+        logger.info('logged in')
 
-        print('retrieving available dates')
+        logger.info('retrieving available dates')
         current_test_date, earliest_available_date = find_dates(driver)
 
-        print('Current test date is {}'.format(current_test_date))
+        logger.info('Current test date is {}'.format(current_test_date))
 
         earliest = arrow.get(earliest_available_date)
         if earliest < arrow.get(current_test_date):
-            print('Earlier date available on {}'.format(earliest_available_date))
+            logger.info('Earlier date available on {}'.format(earliest_available_date))
             if earliest != last_sent_date:
                 last_sent_date = send_message(earliest_available_date)
         else:
-            print('No earlier dates available')
+            logger.info('No earlier dates available')
 
         driver.close()
 
         time_delay = random.randint(MIN_SECONDS, MAX_SECONDS)
-        print('Last checked at {}\n'
-              'Waiting {} minutes {} seconds before checking again.\n\n'.format(arrow.now('BST').format('HH:mm'),
-                                                                                time_delay // 60,
-                                                                                time_delay % 60))
+        logger.info('Last checked at {}\n'
+                    'Waiting {} minutes {} seconds before checking again.\n\n'.format(arrow.now('UTC+1').format('HH:mm'),
+                                                                                      time_delay // 60,
+                                                                                      time_delay % 60))
         time.sleep(time_delay)
 
 
@@ -78,7 +88,7 @@ def find_dates(driver):
 def send_message(date):
     sms_balance = float(api.get_balance()['balance'])
     if sms_balance < 0.5:
-        print('Clockwork sms balance is low. £{}'.format(sms_balance))
+        logger.info('Clockwork sms balance is low. £{}'.format(sms_balance))
 
     text = 'An earlier driving test is available on {}! Book that shit fam.'.format(date)
     message = clockwork.SMS(to=PHONE_NUMBER, message=text)
@@ -86,11 +96,11 @@ def send_message(date):
     response = api.send(message)
 
     if response.success:
-        print('Text notification has been sent to {}. Response ID: {}'.format(PHONE_NUMBER, response.id))
+        logger.info('Text notification has been sent to {}. Response ID: {}'.format(PHONE_NUMBER, response.id))
         return arrow.get(date)
 
     else:
-        print('There has been a fucksy wucksy in the sending process!'
+        logger.info('There has been a fucksy wucksy in the sending process!'
               'Error code: {} \nMessage: {}'.format(response.error_code, response.error_message))
 
         raise RuntimeError('Failed to send message. Wtf is the point of this if sending doesn\'t work?'
